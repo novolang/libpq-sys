@@ -1,0 +1,187 @@
+// API tests for the libpq bindings.
+//
+// Every test below calls into the C library, so the suite needs libpq
+// installed and linked.  `novo pkg build` type-checks the declarations
+// without it; `novo test` runs them and does not.
+//
+// No test needs a PostgreSQL server.  Every connection is made to a
+// Unix-domain socket directory that does not exist, which fails at
+// once and with no network traffic, and libpq answers a connection
+// handle for a failed connection just as it does for a good one.  The
+// entry points that need a live server are written out against the
+// result that a dead connection cannot produce, and guarded by it.
+
+use std.test
+use libpq
+
+// A connection that cannot succeed and cannot wait: the socket
+// directory does not exist, so there is nothing to time out on.
+const DEAD: Str = "host=/nonexistent-socket-dir dbname=nothing connect_timeout=1"
+
+// `CONNECTION_BAD`.
+const CONNECTION_BAD: Int = 1
+
+// `PQTRANS_UNKNOWN`, which a bad connection answers.
+const TRANS_UNKNOWN: Int = 4
+
+// `PGRES_TUPLES_OK` and `PGRES_FATAL_ERROR`.
+const TUPLES_OK: Int = 2
+const FATAL_ERROR: Int = 7
+
+// `PQPING_NO_RESPONSE`.
+const PING_NO_RESPONSE: Int = 2
+
+@test
+fn test_the_client_library_reports_its_own_version() [io, ffi]
+    test.case("PQlibVersion")
+    // 9.0 packs as 90000, and every supported release is above it.
+    test.assert(libpq.pq_lib_version() > 90000)
+
+@test
+fn test_a_result_status_has_a_name() [io, ffi]
+    test.case("PQresStatus")
+    test.assert(ptr.read_str(libpq.pq_res_status(TUPLES_OK)) == "PGRES_TUPLES_OK")
+    test.assert(ptr.read_str(libpq.pq_res_status(FATAL_ERROR)) == "PGRES_FATAL_ERROR")
+
+@test
+fn test_pinging_a_server_that_is_not_there_reports_no_response() [io, ffi]
+    test.case("PQping")
+    test.assert(libpq.pq_ping(DEAD) == PING_NO_RESPONSE)
+
+@test
+fn test_a_failed_connection_is_a_handle_that_describes_itself() [io, ffi]
+    test.case("PQconnectdb, PQstatus, PQerrorMessage and the connection accessors")
+    let conn = libpq.pq_connectdb(DEAD)
+    // libpq answers a handle even for a connection it could not make.
+    test.assert(conn != 0)
+    test.assert(libpq.pq_status(conn) == CONNECTION_BAD)
+    test.assert(str.len(ptr.read_str(libpq.pq_error_message(conn))) > 0)
+    test.assert(ptr.read_str(libpq.pq_db(conn)) == "nothing")
+    test.assert(str.len(ptr.read_str(libpq.pq_user(conn))) > 0)
+    test.assert(ptr.read_str(libpq.pq_host(conn)) == "/nonexistent-socket-dir")
+    test.assert(str.len(ptr.read_str(libpq.pq_port(conn))) > 0)
+    test.assert(libpq.pq_transaction_status(conn) == TRANS_UNKNOWN)
+    // A connection that is not open has no socket, no server process
+    // and no version.
+    let fd = libpq.pq_socket(conn) as i32
+    test.assert(fd == -1)
+    test.assert(libpq.pq_backend_pid(conn) == 0)
+    test.assert(libpq.pq_server_version(conn) == 0)
+    test.assert(libpq.pq_protocol_version(conn) == 0)
+    libpq.pq_finish(conn)
+
+@test
+fn test_reopening_a_connection_that_cannot_open_leaves_it_bad() [io, ffi]
+    test.case("PQreset")
+    let conn = libpq.pq_connectdb(DEAD)
+    libpq.pq_reset(conn)
+    test.assert(libpq.pq_status(conn) == CONNECTION_BAD)
+    libpq.pq_finish(conn)
+
+@test
+fn test_a_command_on_a_dead_connection_fails() [io, ffi]
+    test.case("PQexec, PQresultStatus, PQresultErrorMessage, PQclear")
+    let conn = libpq.pq_connectdb(DEAD)
+    let res = libpq.pq_exec(conn, "SELECT 1")
+    // A dead connection answers either a failed result or nothing at
+    // all, and both are the failure the caller must notice.
+    if res != 0
+        test.assert(libpq.pq_result_status(res) == FATAL_ERROR)
+        test.assert(str.len(ptr.read_str(libpq.pq_result_error_message(res))) > 0)
+        test.assert(libpq.pq_ntuples(res) == 0)
+        test.assert(libpq.pq_nfields(res) == 0)
+        test.assert(str.len(ptr.read_str(libpq.pq_cmd_status(res))) >= 0)
+        test.assert(str.len(ptr.read_str(libpq.pq_cmd_tuples(res))) >= 0)
+        libpq.pq_clear(res)
+    test.assert(libpq.pq_status(conn) == CONNECTION_BAD)
+    libpq.pq_finish(conn)
+
+@test
+fn test_the_parameterised_calls_take_their_arrays_of_addresses() [io, ffi]
+    test.case("PQexecParams, PQprepare, PQexecPrepared")
+    let conn = libpq.pq_connectdb(DEAD)
+    // One parameter, supplied as text: an array of one address.
+    let value = ptr.alloc(16)
+    let _ = ptr.write_bytes_buf(value, bytes.from_str("42\u{0}"))
+    let values = ptr.alloc(8)
+    ptr.write_word(values, value)
+    // 0 for the types, the lengths and the formats asks libpq to infer
+    // the type, read the text to its terminator, and treat it as text.
+    let res = libpq.pq_exec_params(conn, "SELECT $1::int", 1, 0, values, 0, 0, 0)
+    if res != 0
+        test.assert(libpq.pq_result_status(res) == FATAL_ERROR)
+        libpq.pq_clear(res)
+    let prepared = libpq.pq_prepare(conn, "one", "SELECT $1::int", 1, 0)
+    if prepared != 0
+        test.assert(libpq.pq_result_status(prepared) == FATAL_ERROR)
+        libpq.pq_clear(prepared)
+    let run = libpq.pq_exec_prepared(conn, "one", 1, values, 0, 0, 0)
+    if run != 0
+        test.assert(libpq.pq_result_status(run) == FATAL_ERROR)
+        libpq.pq_clear(run)
+    test.assert(libpq.pq_status(conn) == CONNECTION_BAD)
+    ptr.free(values)
+    ptr.free(value)
+    libpq.pq_finish(conn)
+
+@test
+fn test_quoting_goes_through_the_connection() [io, ffi]
+    test.case("PQescapeLiteral, PQescapeIdentifier, PQfreemem")
+    let conn = libpq.pq_connectdb(DEAD)
+    // The quoting uses the connection's encoding, which a connection
+    // that never opened still has: its default.
+    let literal = libpq.pq_escape_literal(conn, "O'Hara", 6)
+    test.assert(literal != 0)
+    test.assert(ptr.read_str(literal) == "'O''Hara'")
+    libpq.pq_freemem(literal)
+    let ident = libpq.pq_escape_identifier(conn, "my table", 8)
+    test.assert(ident != 0)
+    test.assert(ptr.read_str(ident) == "\"my table\"")
+    libpq.pq_freemem(ident)
+    // Releasing the null address is allowed.
+    libpq.pq_freemem(0)
+    libpq.pq_finish(conn)
+
+@test
+fn test_the_asynchronous_calls_answer_on_a_dead_connection() [io, ffi]
+    test.case("PQsendQuery, PQgetResult, PQconsumeInput, PQisBusy, PQsetnonblocking, PQflush")
+    let conn = libpq.pq_connectdb(DEAD)
+    // Every one of these refuses on a connection that never opened,
+    // and each refuses in its own way: -1 from the two that answer a
+    // code, 0 from the three that answer a success flag.
+    let nonblocking = libpq.pq_setnonblocking(conn, 1) as i32
+    test.assert(nonblocking == -1)
+    test.assert(libpq.pq_send_query(conn, "SELECT 1") == 0)
+    test.assert(libpq.pq_consume_input(conn) == 0)
+    test.assert(libpq.pq_is_busy(conn) == 0)
+    let flushed = libpq.pq_flush(conn) as i32
+    test.assert(flushed == -1)
+    // Nothing was sent, so there is no result to collect.
+    test.assert(libpq.pq_get_result(conn) == 0)
+    libpq.pq_finish(conn)
+
+// The column accessors need a result with rows in it, which needs a
+// server.  They are written out against the result a dead connection
+// cannot produce, so the compiler checks their signatures where the
+// library cannot be asked.
+@test
+fn test_the_column_accessors_read_a_result_that_has_rows() [io, ffi]
+    test.case("PQfname, PQfnumber, PQftype, PQgetvalue, PQgetisnull, PQgetlength")
+    let conn = libpq.pq_connectdb(DEAD)
+    let res = libpq.pq_exec(conn, "SELECT 1 AS n, NULL AS nothing")
+    let rows = if res == 0
+        0
+    else
+        libpq.pq_ntuples(res)
+    if rows > 0
+        test.assert(ptr.read_str(libpq.pq_fname(res, 0)) == "n")
+        test.assert(libpq.pq_fnumber(res, "nothing") == 1)
+        test.assert(libpq.pq_ftype(res, 0) == 23)
+        test.assert(ptr.read_str(libpq.pq_getvalue(res, 0, 0)) == "1")
+        test.assert(libpq.pq_getlength(res, 0, 0) == 1)
+        test.assert(libpq.pq_getisnull(res, 0, 0) == 0)
+        test.assert(libpq.pq_getisnull(res, 0, 1) == 1)
+    test.assert(rows == 0)
+    if res != 0
+        libpq.pq_clear(res)
+    libpq.pq_finish(conn)

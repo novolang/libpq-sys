@@ -1,0 +1,43 @@
+[package]
+name        = "libpq-sys"
+version     = "0.1.0"
+description = "Bindings over libpq, the PostgreSQL client library: the connection, the synchronous and asynchronous query calls, the result set, the quoting helpers, the error reporting and the version, one declaration per C entry point."
+license     = "Apache-2.0"
+
+# NOT a `0.0.x` draft.  An interface release is the shape whose every
+# `pub fn` body is a `todo()`, and every `pub fn` here is an `@ffi`
+# declaration with no body at all — `novo pkg publish` reads that as a
+# release with bodies and refuses a `0.0.x` version for it.
+stability   = "experimental"
+
+# `sys`: the layer for a package that binds one C library and decides
+# nothing of its own.  Every `pub fn` below is an `@ffi` declaration of
+# a function in libpq.
+layer       = "sys"
+
+category    = "bindings"
+
+# The one C library.  `libpq.so` is what the loader resolves these
+# symbols against; installing this package does not install it, and it
+# does not install a PostgreSQL server either.
+wraps       = "libpq"
+
+tags        = ["ffi", "postgresql", "postgres", "database", "sql", "bindings"]
+repository  = "https://github.com/novolang/libpq-sys"
+maintainers = ["novo-lang"]
+novo        = ">= 0.8.9"
+
+[docs.pages]
+"README.md" = "The C entry points of libpq, one novo-lang declaration each"
+
+[dependencies]
+# None.  A binding over one C library depends on no novo-lang package.
+
+# The link flag for the `library = "pq"` name every declaration in
+# `src/` carries.  `libpq-dev` installs
+# `/usr/lib/<arch>/pkgconfig/libpq.pc`, so pkg-config answers `-lpq` on
+# Debian and Ubuntu.  The header is under `/usr/include/postgresql`
+# rather than `/usr/include`, which is why the block is not optional
+# for a caller that also compiles C against it.
+[ffi.pq]
+pkg_config = "libpq"

@@ -1,0 +1,351 @@
+// The C entry points of libpq, one novo-lang declaration each.
+//
+// A pointer is an `Int`: the C API hands out two opaque handles, the
+// connection `PGconn*` and the result `PGresult*`, and this module
+// carries each of them as the address the C library returned.  Zero is
+// the null pointer.
+//
+// A `Str` argument is passed as a NUL-terminated C string.  Where a C
+// function answers a `char *`, the answer is an address, and there are
+// two kinds.  One kind the connection or the result owns: read it with
+// `ptr.read_str` and never free it.  The other kind the caller owns:
+// release it with `PQfreemem`.  Each declaration below says which.
+//
+// An array argument — the parameter values of `PQexecParams`, for
+// instance — is the address of an array of addresses the caller lays
+// out with `ptr.alloc` and `ptr.write_word`.
+//
+// `PQsocket`, `PQserverVersion` and their neighbours answer a C `int`
+// that can be negative.  Convert with `as i32` before comparing one
+// with a negative number.
+
+// Open a connection, using a keyword and value string.
+//
+// `conninfo` is a string of `keyword=value` pairs separated by spaces,
+// such as `"host=localhost dbname=orders connect_timeout=5"`, or a URI
+// beginning `postgresql://`.  Answers a handle, and 0 only when memory
+// ran out.  A handle is answered for a failed connection too, so the
+// caller checks `PQstatus` and closes the handle either way.
+pub @ffi(library = "pq", symbol = "PQconnectdb")
+fn pq_connectdb(conninfo: Str) -> Int [io, ffi]
+
+// Close a connection and release its handle.
+//
+// Every result obtained from the connection stays valid, because a
+// result holds its own copy of the data.
+pub @ffi(library = "pq", symbol = "PQfinish")
+fn pq_finish(conn: Int) [io, ffi]
+
+// Close the connection and open it again with the same options.
+//
+// This is how a program recovers after the server restarted or the
+// connection was lost.  The handle stays the same, and `PQstatus` says
+// whether it worked.
+pub @ffi(library = "pq", symbol = "PQreset")
+fn pq_reset(conn: Int) [io, ffi]
+
+// Get the status of a connection.
+//
+// Answers 0, `CONNECTION_OK`, or 1, `CONNECTION_BAD`.  A connection
+// that was good can go bad, and only a command finds out.
+pub @ffi(library = "pq", symbol = "PQstatus")
+fn pq_status(conn: Int) -> Int [ffi]
+
+// Get the transaction status of a connection.
+//
+// Answers 0 for idle, 1 for a command in progress, 2 for idle inside a
+// transaction, 3 for idle inside a failed transaction and 4 when it
+// cannot be determined, which is what a bad connection answers.
+pub @ffi(library = "pq", symbol = "PQtransactionStatus")
+fn pq_transaction_status(conn: Int) -> Int [ffi]
+
+// Get the message describing the last failure on a connection.
+//
+// The answer is the address of a string the connection owns, ending in
+// a newline.  It is the empty string when nothing has failed.
+pub @ffi(library = "pq", symbol = "PQerrorMessage")
+fn pq_error_message(conn: Int) -> Int [ffi]
+
+// Get the database name of a connection.
+//
+// The answer is the address of a string the connection owns.
+pub @ffi(library = "pq", symbol = "PQdb")
+fn pq_db(conn: Int) -> Int [ffi]
+
+// Get the user name of a connection.
+//
+// The answer is the address of a string the connection owns.
+pub @ffi(library = "pq", symbol = "PQuser")
+fn pq_user(conn: Int) -> Int [ffi]
+
+// Get the server host of a connection.
+//
+// The answer is the address of a string the connection owns: a host
+// name, an address, or the directory of a Unix-domain socket.
+pub @ffi(library = "pq", symbol = "PQhost")
+fn pq_host(conn: Int) -> Int [ffi]
+
+// Get the port of a connection.
+//
+// The answer is the address of a string the connection owns, not a
+// number.
+pub @ffi(library = "pq", symbol = "PQport")
+fn pq_port(conn: Int) -> Int [ffi]
+
+// Get the file descriptor of a connection's socket.
+//
+// Answers -1 when the connection is not open.  This is the descriptor
+// a program waits on when it drives the connection asynchronously; it
+// must never be read or written directly.
+pub @ffi(library = "pq", symbol = "PQsocket")
+fn pq_socket(conn: Int) -> Int [ffi]
+
+// Get the process identifier of the server process handling this
+// connection.
+//
+// Answers 0 when the connection is not open.  It is what a
+// `pg_cancel_backend` call in another session names.
+pub @ffi(library = "pq", symbol = "PQbackendPID")
+fn pq_backend_pid(conn: Int) -> Int [ffi]
+
+// Get the version of the server.
+//
+// The value is the major version times ten thousand plus the minor:
+// 16.2 answers 160002.  Answers 0 when the connection is not open.
+pub @ffi(library = "pq", symbol = "PQserverVersion")
+fn pq_server_version(conn: Int) -> Int [ffi]
+
+// Get the version of the frontend/backend protocol in use.
+//
+// Answers 3 for every currently supported server, and 0 when the
+// connection is not open.
+pub @ffi(library = "pq", symbol = "PQprotocolVersion")
+fn pq_protocol_version(conn: Int) -> Int [ffi]
+
+// Ask whether a server is accepting connections, without opening one.
+//
+// `conninfo` is as it is for `PQconnectdb`.  Answers 0 when the server
+// is accepting connections, 1 when it is alive and refusing them, 2
+// when no connection could be made, and 3 when the parameters were bad
+// enough that nothing was attempted.
+pub @ffi(library = "pq", symbol = "PQping")
+fn pq_ping(conninfo: Str) -> Int [io, ffi]
+
+// Get the version of the client library.
+//
+// The value is the major version times ten thousand plus the minor:
+// 16.15 answers 160015.
+pub @ffi(library = "pq", symbol = "PQlibVersion")
+fn pq_lib_version() -> Int [ffi]
+
+// Run one or more semicolon-separated commands and wait for the result.
+//
+// Answers a result handle, or 0 when memory ran out or the connection
+// is unusable.  The caller releases the handle with `PQclear`.  Several
+// commands in one call run in a single transaction, and only the last
+// one's result is answered.
+pub @ffi(library = "pq", symbol = "PQexec")
+fn pq_exec(conn: Int, query: Str) -> Int [io, ffi]
+
+// Run one command with out-of-line parameter values.
+//
+// `n_params` is the number of parameters, which the command refers to
+// as `$1` upwards.  `param_types`, `param_lengths` and `param_formats`
+// are addresses of arrays, and 0 for each asks libpq to infer the type,
+// to read each text value up to its terminator, and to treat every
+// value as text.  `param_values` is the address of an array of
+// addresses, one per parameter, where 0 is a SQL NULL.  `result_format`
+// is 0 for text results and 1 for binary.
+//
+// Only ONE command is allowed here, which is what makes this the call
+// that cannot be turned into two by a value.
+pub @ffi(library = "pq", symbol = "PQexecParams")
+fn pq_exec_params(conn: Int, command: Str, n_params: Int, param_types: Int, param_values: Int,
+                  param_lengths: Int, param_formats: Int, result_format: Int) -> Int [io, ffi]
+
+// Prepare a command on the server under a name.
+//
+// `stmt_name` is the name, and the empty string names the unnamed
+// statement.  `param_types` is the address of an array of type
+// identifiers, or 0 to let the server infer them.  Answers a result
+// handle whose status says whether the preparation succeeded.
+pub @ffi(library = "pq", symbol = "PQprepare")
+fn pq_prepare(conn: Int, stmt_name: Str, query: Str, n_params: Int,
+              param_types: Int) -> Int [io, ffi]
+
+// Run a command prepared earlier under a name.
+//
+// The arguments after `stmt_name` are those of `PQexecParams` without
+// the types, which the preparation already fixed.
+pub @ffi(library = "pq", symbol = "PQexecPrepared")
+fn pq_exec_prepared(conn: Int, stmt_name: Str, n_params: Int, param_values: Int, param_lengths: Int,
+                    param_formats: Int, result_format: Int) -> Int [io, ffi]
+
+// Quote a string as a SQL literal, for this connection.
+//
+// `len` is the length in bytes.  The answer is the address of a string
+// the CALLER owns, quotes included, released with `PQfreemem`.  It is 0
+// on failure.  The connection is an argument because the quoting
+// depends on the server's encoding and its standard-strings setting.
+pub @ffi(library = "pq", symbol = "PQescapeLiteral")
+fn pq_escape_literal(conn: Int, s: Str, len: Int) -> Int [ffi]
+
+// Quote a string as a SQL identifier, for this connection.
+//
+// Like `PQescapeLiteral`, with double quotes rather than single ones.
+// This is for a table or column name that came from outside the
+// program.
+pub @ffi(library = "pq", symbol = "PQescapeIdentifier")
+fn pq_escape_identifier(conn: Int, s: Str, len: Int) -> Int [ffi]
+
+// Release memory libpq allocated for the caller.
+//
+// The addresses that need it are the ones `PQescapeLiteral` and
+// `PQescapeIdentifier` answer.  Releasing the null address is allowed.
+pub @ffi(library = "pq", symbol = "PQfreemem")
+fn pq_freemem(addr: Int) [ffi]
+
+// Get the status of a result.
+//
+// Answers 0 for an empty command, 1 for a command that returns no
+// rows, 2 for one that returns rows, 5 for an unexpected response from
+// the server, 6 for a notice and 7 for a failed command.  Only 1 and 2
+// are success.
+pub @ffi(library = "pq", symbol = "PQresultStatus")
+fn pq_result_status(res: Int) -> Int [ffi]
+
+// Get the name of a result status.
+//
+// The answer is the address of a static string such as
+// `"PGRES_TUPLES_OK"`.
+pub @ffi(library = "pq", symbol = "PQresStatus")
+fn pq_res_status(status: Int) -> Int [ffi]
+
+// Get the message describing a failed result.
+//
+// The answer is the address of a string the result owns, ending in a
+// newline, and it is the empty string when the command succeeded.
+// Unlike `PQerrorMessage`, it stays valid for as long as the result
+// does.
+pub @ffi(library = "pq", symbol = "PQresultErrorMessage")
+fn pq_result_error_message(res: Int) -> Int [ffi]
+
+// Get the number of rows in a result.
+//
+// Answers 0 for a command that returns no rows.
+pub @ffi(library = "pq", symbol = "PQntuples")
+fn pq_ntuples(res: Int) -> Int [ffi]
+
+// Get the number of columns in a result.
+pub @ffi(library = "pq", symbol = "PQnfields")
+fn pq_nfields(res: Int) -> Int [ffi]
+
+// Get the name of a column.
+//
+// `field_num` is zero-based.  The answer is the address of a string the
+// result owns, or 0 when there is no such column.
+pub @ffi(library = "pq", symbol = "PQfname")
+fn pq_fname(res: Int, field_num: Int) -> Int [ffi]
+
+// Get the number of a column by its name.
+//
+// Answers -1 when the result has no column of that name.  The name is
+// matched as an unquoted SQL identifier, so it is folded to lower case.
+pub @ffi(library = "pq", symbol = "PQfnumber")
+fn pq_fnumber(res: Int, field_name: Str) -> Int [ffi]
+
+// Get the data type of a column.
+//
+// The answer is the type's object identifier in the server's own
+// `pg_type` table: 23 is `int4`, 25 is `text`, 16 is `bool`.
+pub @ffi(library = "pq", symbol = "PQftype")
+fn pq_ftype(res: Int, field_num: Int) -> Int [ffi]
+
+// Get one field of one row.
+//
+// Both indexes are zero-based.  The answer is the address of the bytes,
+// which the result owns.  For a text result they are a NUL-terminated
+// string, and for a NULL field they are an empty string — which is why
+// `PQgetisnull` is the only way to tell a NULL from an empty value.
+pub @ffi(library = "pq", symbol = "PQgetvalue")
+fn pq_getvalue(res: Int, tup_num: Int, field_num: Int) -> Int [ffi]
+
+// Ask whether one field of one row is NULL.
+//
+// Answers 1 when it is.
+pub @ffi(library = "pq", symbol = "PQgetisnull")
+fn pq_getisnull(res: Int, tup_num: Int, field_num: Int) -> Int [ffi]
+
+// Get the length in bytes of one field of one row.
+//
+// For a text result this is the length of the string without its
+// terminator, and for a binary one the size of the value.
+pub @ffi(library = "pq", symbol = "PQgetlength")
+fn pq_getlength(res: Int, tup_num: Int, field_num: Int) -> Int [ffi]
+
+// Get the command tag of a result.
+//
+// The answer is the address of a string the result owns, such as
+// `"INSERT 0 1"` or `"SELECT 3"`.
+pub @ffi(library = "pq", symbol = "PQcmdStatus")
+fn pq_cmd_status(res: Int) -> Int [ffi]
+
+// Get the number of rows an INSERT, UPDATE or DELETE affected.
+//
+// The answer is the address of a string the result owns holding a
+// decimal number, and it is the empty string for a command that
+// affected no rows by that measure.
+pub @ffi(library = "pq", symbol = "PQcmdTuples")
+fn pq_cmd_tuples(res: Int) -> Int [ffi]
+
+// Release a result handle.
+//
+// Every address read out of the result stops being valid.  Releasing
+// the null address is allowed.
+pub @ffi(library = "pq", symbol = "PQclear")
+fn pq_clear(res: Int) [ffi]
+
+// Send a command without waiting for its result.
+//
+// Answers 1 when the command was sent.  The results are then collected
+// with `PQgetResult` until it answers 0.
+pub @ffi(library = "pq", symbol = "PQsendQuery")
+fn pq_send_query(conn: Int, query: Str) -> Int [io, ffi]
+
+// Take the next result of a command sent asynchronously.
+//
+// Answers a result handle, or 0 when the command has no more results.
+// The 0 is what says the command is finished, so it must be reached
+// before another command is sent.
+pub @ffi(library = "pq", symbol = "PQgetResult")
+fn pq_get_result(conn: Int) -> Int [io, ffi]
+
+// Read whatever has arrived on the connection's socket.
+//
+// Answers 1 on success and 0 on a failure, which `PQerrorMessage`
+// describes.  A caller that waits on the socket calls this once the
+// socket is readable, and then `PQisBusy`.
+pub @ffi(library = "pq", symbol = "PQconsumeInput")
+fn pq_consume_input(conn: Int) -> Int [io, ffi]
+
+// Ask whether a result would block.
+//
+// Answers 1 when `PQgetResult` would wait for the server.  A 0 means
+// the next `PQgetResult` answers at once.
+pub @ffi(library = "pq", symbol = "PQisBusy")
+fn pq_is_busy(conn: Int) -> Int [ffi]
+
+// Set whether the connection blocks when it sends.
+//
+// `arg` is 1 for non-blocking.  Answers 0 on success and -1 on
+// failure.  In non-blocking mode a send may be incomplete, and
+// `PQflush` is what finishes it.
+pub @ffi(library = "pq", symbol = "PQsetnonblocking")
+fn pq_setnonblocking(conn: Int, arg: Int) -> Int [ffi]
+
+// Push whatever is queued for sending out to the server.
+//
+// Answers 0 when the queue is empty, 1 when bytes are still waiting
+// and the socket is not writable, and -1 on a failure.
+pub @ffi(library = "pq", symbol = "PQflush")
+fn pq_flush(conn: Int) -> Int [io, ffi]
