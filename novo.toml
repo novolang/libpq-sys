@@ -1,13 +1,12 @@
 [package]
 name        = "libpq-sys"
-version     = "0.1.0"
+version     = "0.1.1"
 description = "Bindings over libpq, the PostgreSQL client library: the connection, the synchronous and asynchronous query calls, the result set, the quoting helpers, the error reporting and the version, one declaration per C entry point."
 license     = "Apache-2.0"
 
-# NOT a `0.0.x` draft.  An interface release is the shape whose every
-# `pub fn` body is a `todo()`, and every `pub fn` here is an `@ffi`
-# declaration with no body at all — `novo pkg publish` reads that as a
-# release with bodies and refuses a `0.0.x` version for it.
+# `experimental` because no program outside this repository has used
+# the package yet, and the tests exercise the entry points rather than
+# a consumer's use of them.
 stability   = "experimental"
 
 # `sys`: the layer for a package that binds one C library and decides
@@ -18,7 +17,7 @@ layer       = "sys"
 category    = "bindings"
 
 # The one C library.  `libpq.so` is what the loader resolves these
-# symbols against; installing this package does not install it, and it
+# symbols against.  Installing this package does not install it, and it
 # does not install a PostgreSQL server either.
 wraps       = "libpq"
 
@@ -37,7 +36,7 @@ novo        = ">= 0.8.9"
 # `src/` carries.  `libpq-dev` installs
 # `/usr/lib/<arch>/pkgconfig/libpq.pc`, so pkg-config answers `-lpq` on
 # Debian and Ubuntu.  The header is under `/usr/include/postgresql`
-# rather than `/usr/include`, which is why the block is not optional
-# for a caller that also compiles C against it.
+# rather than `/usr/include`, so a caller that also compiles C against
+# it needs the flags pkg-config answers.
 [ffi.pq]
 pkg_config = "libpq"

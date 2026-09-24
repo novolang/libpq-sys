@@ -1,20 +1,20 @@
-// API tests for the libpq bindings.
+// The tests over the entry points of the libpq bindings.
 //
 // Every test below calls into the C library, so the suite needs libpq
 // installed and linked.  `novo pkg build` type-checks the declarations
-// without it; `novo test` runs them and does not.
+// without it.  `novo test` runs them and does not.
 //
 // No test needs a PostgreSQL server.  Every connection is made to a
 // Unix-domain socket directory that does not exist, which fails at
-// once and with no network traffic, and libpq answers a connection
-// handle for a failed connection just as it does for a good one.  The
-// entry points that need a live server are written out against the
-// result that a dead connection cannot produce, and guarded by it.
+// once and with no network traffic.  libpq answers a connection handle
+// for a failed connection just as it does for a good one.  The
+// assertions that need rows from a live server run only when a result
+// has rows, which a failed connection never gives.
 
 use std.test
 use libpq
 
-// A connection that cannot succeed and cannot wait: the socket
+// A connection that cannot succeed and cannot wait.  The socket
 // directory does not exist, so there is nothing to time out on.
 const DEAD: Str = "host=/nonexistent-socket-dir dbname=nothing connect_timeout=1"
 
@@ -100,7 +100,7 @@ fn test_a_command_on_a_dead_connection_fails() [io, ffi]
 fn test_the_parameterised_calls_take_their_arrays_of_addresses() [io, ffi]
     test.case("PQexecParams, PQprepare, PQexecPrepared")
     let conn = libpq.pq_connectdb(DEAD)
-    // One parameter, supplied as text: an array of one address.
+    // One parameter, supplied as text, is an array of one address.
     let value = ptr.alloc(16)
     let _ = ptr.write_bytes_buf(value, bytes.from_str("42\u{0}"))
     let values = ptr.alloc(8)
@@ -128,8 +128,8 @@ fn test_the_parameterised_calls_take_their_arrays_of_addresses() [io, ffi]
 fn test_quoting_goes_through_the_connection() [io, ffi]
     test.case("PQescapeLiteral, PQescapeIdentifier, PQfreemem")
     let conn = libpq.pq_connectdb(DEAD)
-    // The quoting uses the connection's encoding, which a connection
-    // that never opened still has: its default.
+    // The quoting uses the connection's encoding, and a connection that
+    // never opened still has the default one.
     let literal = libpq.pq_escape_literal(conn, "O'Hara", 6)
     test.assert(literal != 0)
     test.assert(ptr.read_str(literal) == "'O''Hara'")
@@ -146,9 +146,9 @@ fn test_quoting_goes_through_the_connection() [io, ffi]
 fn test_the_asynchronous_calls_answer_on_a_dead_connection() [io, ffi]
     test.case("PQsendQuery, PQgetResult, PQconsumeInput, PQisBusy, PQsetnonblocking, PQflush")
     let conn = libpq.pq_connectdb(DEAD)
-    // Every one of these refuses on a connection that never opened,
-    // and each refuses in its own way: -1 from the two that answer a
-    // code, 0 from the three that answer a success flag.
+    // Each of these answers a refusal on a connection that never
+    // opened.  The two that answer a code answer -1, and the ones that
+    // answer a flag answer 0.
     let nonblocking = libpq.pq_setnonblocking(conn, 1) as i32
     test.assert(nonblocking == -1)
     test.assert(libpq.pq_send_query(conn, "SELECT 1") == 0)
@@ -161,9 +161,9 @@ fn test_the_asynchronous_calls_answer_on_a_dead_connection() [io, ffi]
     libpq.pq_finish(conn)
 
 // The column accessors need a result with rows in it, which needs a
-// server.  They are written out against the result a dead connection
-// cannot produce, so the compiler checks their signatures where the
-// library cannot be asked.
+// server.  The assertions over them run only when the result has rows.
+// A failed connection gives none, so here the compiler checks the calls
+// and the test asserts that no rows arrived.
 @test
 fn test_the_column_accessors_read_a_result_that_has_rows() [io, ffi]
     test.case("PQfname, PQfnumber, PQftype, PQgetvalue, PQgetisnull, PQgetlength")

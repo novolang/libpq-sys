@@ -1,20 +1,19 @@
 # libpq-sys
 
 libpq is the C application programmer's interface to PostgreSQL. It is
-the library every other PostgreSQL client interface is built on, and it
+the library most other PostgreSQL client libraries are built on, and it
 speaks the frontend/backend protocol to a server over a TCP socket or a
-Unix-domain socket. Its interface is documented in
-[chapter 34 of the PostgreSQL manual](https://www.postgresql.org/docs/current/libpq.html).
+Unix-domain socket. Its API is documented in
+[the libpq chapter of the PostgreSQL manual](https://www.postgresql.org/docs/current/libpq.html).
 This package declares forty-three of that library's entry points to
 novo-lang, one declaration each.
 
-**Status: a binding, not a port.** Every function in this package is a
-declaration of a function in libpq. The package contains no logic of
-its own, and it does nothing without the C library installed. The
-forty-three entry points are the ones a program needs to connect, run
-commands with or without parameters, read the rows back and report a
-failure; the section "What is not included" says what a program still
-cannot do with them alone.
+Every function here is a declaration of a function in libpq. The
+package contains no logic of its own, and it does nothing without the C
+library installed. The forty-three entry points are the ones a program
+needs to connect, run commands with or without parameters, read the
+rows back and report a failure. The section "What is not included" says
+what a program cannot do with them alone.
 
 ## What it is
 
@@ -46,6 +45,11 @@ that returned some, and `PGRES_FATAL_ERROR` (7) a command that failed.
 | 6 | `PGRES_NONFATAL_ERROR` | a notice or a warning |
 | 7 | `PGRES_FATAL_ERROR` | the command failed |
 
+libpq passes a result of status 6 to the notice processor rather than
+answering it from a query call. The statuses the table leaves out
+belong to COPY, single-row mode and pipeline mode, which this package
+does not include.
+
 A **parameter** is a value supplied beside the command rather than
 inside it. `PQexecParams` takes a command referring to `$1`, `$2` and
 so on, and an array of values. The server never sees the values as part
@@ -74,8 +78,8 @@ default search path. On other systems it builds with the rest of the
 PostgreSQL source.
 
 The header is installed under `/usr/include/postgresql` rather than
-`/usr/include`, which is why the manifest names `libpq` to pkg-config
-rather than relying on the default flag.
+`/usr/include`, so the manifest asks pkg-config for `libpq` rather
+than relying on the default flag.
 
 ## Example
 
@@ -93,7 +97,7 @@ fn main() [io, ffi]
         return
 
     let res = libpq.pq_exec(conn, "SELECT city, people FROM town ORDER BY people DESC")
-    // 2 is PGRES_TUPLES_OK: the command returned rows.
+    // 2 is PGRES_TUPLES_OK, a command that returned rows.
     if libpq.pq_result_status(res) != 2
         println(ptr.read_str(libpq.pq_result_error_message(res)))
         libpq.pq_clear(res)
@@ -114,9 +118,10 @@ fn main() [io, ffi]
     libpq.pq_finish(conn)
 ```
 
-The example is fenced as an illustration rather than a compiled block
-because it needs a running PostgreSQL server, which this repository
-does not start.
+The fence reads `novo ignore`, so `novo doc` lists the example and does
+not compile it. A compiled block is linked against libpq, and the
+example also needs a running PostgreSQL server. The examples in the
+declarations' comments are fenced the same way.
 
 ## What the package contains
 
@@ -136,20 +141,21 @@ The five groups and their sizes:
 
 ## How to choose an entry point
 
-`PQexec` is the short path: one call, one wait, one result. It accepts
-several semicolon-separated commands, which run in a single
-transaction, and answers only the last one's result.
+`PQexec` is the short path, with one call, one wait and one result. It
+accepts several semicolon-separated commands, which run in a single
+transaction unless the string contains BEGIN and COMMIT, and it
+answers only the last command's result.
 
-`PQexecParams` accepts exactly **one** command, and that is the point:
-a value supplied out of line cannot add a second. Use it whenever a
-value comes from outside the program.
+`PQexecParams` accepts exactly one command. A value supplied out of
+line is never parsed as SQL, so it cannot add a second. Use it whenever
+a value comes from outside the program.
 
 `PQprepare` and `PQexecPrepared` are for a command run many times. The
 server parses and plans it once.
 
 `PQsendQuery` with `PQconsumeInput`, `PQisBusy` and `PQgetResult` is for
-a program that cannot block: it waits on the socket itself between
-calls. `PQsocket` gives the descriptor to wait on.
+a program that cannot block. The program waits on the socket itself
+between calls. `PQsocket` gives the descriptor to wait on.
 
 ## The rules a user needs
 
@@ -157,7 +163,8 @@ calls. `PQsocket` gives the descriptor to wait on.
    and the result handle arrive as the addresses libpq returned.
 2. **`PQconnectdb` answers a handle even when it failed.** Check
    `PQstatus`, and call `PQfinish` either way. A handle is 0 only when
-   memory ran out. PostgreSQL manual, section 34.1.
+   memory ran out. PostgreSQL manual, libpq, "Database Connection
+   Control Functions".
 3. **An entry point that answers a C `int` answers it in 32 bits.**
    Write `as i32` before comparing the answer with a negative number.
    `PQsocket`, `PQfnumber`, `PQsetnonblocking` and `PQflush` all answer
@@ -167,22 +174,23 @@ calls. `PQsocket` gives the descriptor to wait on.
    does not release it.
 5. **A NULL field and an empty field read the same.** `PQgetvalue`
    answers an empty string for both. `PQgetisnull` is the only way to
-   tell them apart. PostgreSQL manual, section 34.3.1.
+   tell them apart. PostgreSQL manual, libpq, "Retrieving Query Result
+   Information".
 6. **A string an accessor answers belongs to the connection or the
    result.** Copy it with `ptr.read_str` before the owner is closed or
    cleared. The two exceptions are `PQescapeLiteral` and
    `PQescapeIdentifier`, whose answers belong to the caller and are
    released with `PQfreemem`.
 7. **`PQerrorMessage` is overwritten by the next operation.**
-   `PQresultErrorMessage` is not: it stays valid for as long as its
+   `PQresultErrorMessage` is not. It stays valid for as long as its
    result does. Use the second when the message has to outlive the
    next call.
 8. **Pass a value as a parameter rather than building it into the
    command text.** `PQexecParams` and `PQexecPrepared` send the values
    separately, and the server never parses them as SQL. When a value
-   must go into the text — a table name, for instance —
-   `PQescapeIdentifier` and `PQescapeLiteral` are the calls, and both
-   need the connection because the quoting depends on its encoding.
+   such as a table name must go into the text, `PQescapeIdentifier` and
+   `PQescapeLiteral` are the calls. Both need the connection, because
+   the quoting depends on its encoding.
 9. **An array argument is an array of addresses.** `param_values` is
    the address of an array of `n_params` addresses, laid out with
    `ptr.alloc` and `ptr.write_word`. A 0 in it is a SQL NULL. Passing 0
@@ -204,8 +212,8 @@ calls. `PQsocket` gives the descriptor to wait on.
 - **`PQconnectdbParams` and `PQconninfo`.** They take and answer arrays
   of `PQconninfoOption` structures.
 - **The asynchronous connection.** `PQconnectStart` and `PQconnectPoll`
-  open a connection without blocking. They are left out of the first
-  release; `PQconnectdb` blocks until the connection succeeds or the
+  open a connection without blocking. They are left out of this
+  release. `PQconnectdb` blocks until the connection succeeds or the
   timeout in the connection string expires.
 - **`PQnotifies` and LISTEN/NOTIFY.** A notification is a `PGnotify`
   structure the caller reads fields out of.
@@ -213,40 +221,41 @@ calls. `PQsocket` gives the descriptor to wait on.
   `PQsetNoticeProcessor` take C function pointers. Without them a
   notice from the server is printed to standard error, which is
   libpq's default.
-- **The COPY interface.** `PQputCopyData`, `PQgetCopyData` and their
+- **The COPY functions.** `PQputCopyData`, `PQgetCopyData` and their
   neighbours are the bulk load and unload path. They are left out of
-  the first release.
-- **The large object interface.** `lo_open`, `lo_read` and their
+  this release.
+- **The large object functions.** `lo_open`, `lo_read` and their
   neighbours are a separate facility for values too large for a row.
 - **Single-row mode and pipeline mode.** `PQsetSingleRowMode` and the
   `PQpipeline*` family change how results arrive. They are left out of
-  the first release.
+  this release.
 - **`PQresultErrorField`.** It answers one field of the structured
-  error — the SQLSTATE code, the constraint name, the position — and it
-  is the one omission a caller is likely to miss. It takes a field code
-  and is left out of the first release; `PQresultErrorMessage` carries
-  the same information as text.
-- **The cancellation interface.** `PQgetCancel` and `PQcancel` answer
+  error, such as the SQLSTATE code, the constraint name or the
+  position. It is left out of this release. `PQresultErrorMessage`
+  carries the same information as text.
+- **The cancellation functions.** `PQgetCancel` and `PQcancel` answer
   and use a `PGcancel` object. `PQbackendPID` is here, which is what a
   second connection needs to cancel a query with `pg_cancel_backend`.
 
 ## Related packages
 
-`postgres-nv` is a PostgreSQL client written in novo-lang, speaking the
-frontend/backend protocol directly with no C library. That native wire
-protocol is the plan, and this package is what a program uses until it
-lands. `postgres-nv` is planned and not published yet.
+[postgres-nv](https://novo-lang.org/packages/postgres-nv) is a
+PostgreSQL client written in novo-lang, speaking the frontend/backend
+protocol directly with no C library. It is published as an interface
+release. Every function in it is declared and none has a body yet, so
+a program that must reach a server today uses this package.
 
-Choose `postgres-nv` when the program must build for WebAssembly, or
-when a C toolchain is not wanted. Choose this package when the program
-needs libpq's own connection handling — its service file, its
-`.pgpass`, its SSL negotiation and its GSSAPI support — or must behave
-exactly as an existing libpq client does.
+When its functions have bodies, `postgres-nv` is the choice for a
+program that must build for WebAssembly or does without a C toolchain.
+This package is the choice for a program that needs libpq's own
+connection handling, which covers its service file, its `.pgpass`, its
+SSL negotiation and its GSSAPI support. It is also the choice for a
+program that must behave exactly as an existing libpq client does.
 
 ## Tests
 
-`tests/libpq_tests.nv` holds ten tests written against the signatures.
-They call the C library, so `novo test` needs libpq installed and
+`tests/libpq_tests.nv` holds ten tests over the forty-three entry
+points. They call the C library, so `novo test` needs libpq installed and
 linkable:
 
 ```
@@ -270,25 +279,14 @@ and a socket of -1, that reopening it leaves it bad, that a command on
 it fails, that the parameterised calls accept their arrays of
 addresses, that `PQescapeLiteral` turns `O'Hara` into `'O''Hara'`, and
 that each of the six asynchronous calls refuses in the way the
-reference says it does. The column accessors need rows, so they are
-written out against a result a dead connection cannot produce, which
-exercises their signatures against the compiler where the library
-cannot be asked.
+reference says it does. The column accessors need rows from a live
+server. Their assertions run only when a result has rows, so in this
+suite the compiler checks the calls and the test asserts that a failed
+connection gave no rows.
 
-## Implementation status
-
-| Group | State |
-| --- | --- |
-| Connection | Complete for the blocking, connection-string form. |
-| Commands | Complete for the four synchronous forms. |
-| Quoting | Complete. |
-| Result | Complete except `PQresultErrorField`. |
-| Asynchronous | Complete for sending and draining. |
-| Asynchronous connection | Absent. Left out of the first release. |
-| Notifications | Absent. A notification is a structure. |
-| COPY | Absent. Left out of the first release. |
-| Large objects | Absent. Left out of the first release. |
-| Cancellation | Absent. It needs a `PGcancel` object. |
+libpq is not installed on the machine where this package is written,
+so the suite has not linked there and none of its assertions has been
+observed to pass. `novo test` stops at the link, naming `-lpq`.
 
 ## Licence
 

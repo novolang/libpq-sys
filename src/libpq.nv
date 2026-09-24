@@ -1,23 +1,27 @@
 // The C entry points of libpq, one novo-lang declaration each.
 //
-// A pointer is an `Int`: the C API hands out two opaque handles, the
+// A pointer is an `Int`.  The C API hands out two opaque handles, the
 // connection `PGconn*` and the result `PGresult*`, and this module
 // carries each of them as the address the C library returned.  Zero is
 // the null pointer.
 //
 // A `Str` argument is passed as a NUL-terminated C string.  Where a C
 // function answers a `char *`, the answer is an address, and there are
-// two kinds.  One kind the connection or the result owns: read it with
-// `ptr.read_str` and never free it.  The other kind the caller owns:
-// release it with `PQfreemem`.  Each declaration below says which.
+// two kinds.  The connection or the result owns the first kind, which
+// is read with `ptr.read_str` and never freed.  The caller owns the
+// second kind, which is released with `PQfreemem`.  Each declaration
+// below says which kind it answers.
 //
-// An array argument — the parameter values of `PQexecParams`, for
-// instance — is the address of an array of addresses the caller lays
-// out with `ptr.alloc` and `ptr.write_word`.
+// An array argument, such as the parameter values of `PQexecParams`, is
+// the address of an array of addresses the caller lays out with
+// `ptr.alloc` and `ptr.write_word`.
 //
-// `PQsocket`, `PQserverVersion` and their neighbours answer a C `int`
-// that can be negative.  Convert with `as i32` before comparing one
-// with a negative number.
+// A C `int` arrives in 32 bits.  `PQsocket`, `PQfnumber`,
+// `PQsetnonblocking` and `PQflush` answer -1 in ordinary use, so convert
+// the answer with `as i32` before comparing it with a negative number.
+//
+// The examples in these comments are fenced `novo ignore`.  A compiled
+// example links against libpq, and most of them need a running server.
 
 // Open a connection, using a keyword and value string.
 //
@@ -26,6 +30,10 @@
 // beginning `postgresql://`.  Answers a handle, and 0 only when memory
 // ran out.  A handle is answered for a failed connection too, so the
 // caller checks `PQstatus` and closes the handle either way.
+//
+// ```novo ignore
+// let conn = libpq.pq_connectdb("host=localhost dbname=orders connect_timeout=5")
+// ```
 pub @ffi(library = "pq", symbol = "PQconnectdb")
 fn pq_connectdb(conninfo: Str) -> Int [io, ffi]
 
@@ -33,14 +41,22 @@ fn pq_connectdb(conninfo: Str) -> Int [io, ffi]
 //
 // Every result obtained from the connection stays valid, because a
 // result holds its own copy of the data.
+//
+// ```novo ignore
+// libpq.pq_finish(conn)
+// ```
 pub @ffi(library = "pq", symbol = "PQfinish")
 fn pq_finish(conn: Int) [io, ffi]
 
 // Close the connection and open it again with the same options.
 //
-// This is how a program recovers after the server restarted or the
+// A program calls it to recover after the server restarted or the
 // connection was lost.  The handle stays the same, and `PQstatus` says
 // whether it worked.
+//
+// ```novo ignore
+// libpq.pq_reset(conn)
+// ```
 pub @ffi(library = "pq", symbol = "PQreset")
 fn pq_reset(conn: Int) [io, ffi]
 
@@ -48,6 +64,10 @@ fn pq_reset(conn: Int) [io, ffi]
 //
 // Answers 0, `CONNECTION_OK`, or 1, `CONNECTION_BAD`.  A connection
 // that was good can go bad, and only a command finds out.
+//
+// ```novo ignore
+// let ok = libpq.pq_status(conn) == 0
+// ```
 pub @ffi(library = "pq", symbol = "PQstatus")
 fn pq_status(conn: Int) -> Int [ffi]
 
@@ -56,6 +76,10 @@ fn pq_status(conn: Int) -> Int [ffi]
 // Answers 0 for idle, 1 for a command in progress, 2 for idle inside a
 // transaction, 3 for idle inside a failed transaction and 4 when it
 // cannot be determined, which is what a bad connection answers.
+//
+// ```novo ignore
+// let in_transaction = libpq.pq_transaction_status(conn) == 2
+// ```
 pub @ffi(library = "pq", symbol = "PQtransactionStatus")
 fn pq_transaction_status(conn: Int) -> Int [ffi]
 
@@ -63,18 +87,30 @@ fn pq_transaction_status(conn: Int) -> Int [ffi]
 //
 // The answer is the address of a string the connection owns, ending in
 // a newline.  It is the empty string when nothing has failed.
+//
+// ```novo ignore
+// println(ptr.read_str(libpq.pq_error_message(conn)))
+// ```
 pub @ffi(library = "pq", symbol = "PQerrorMessage")
 fn pq_error_message(conn: Int) -> Int [ffi]
 
 // Get the database name of a connection.
 //
 // The answer is the address of a string the connection owns.
+//
+// ```novo ignore
+// println(ptr.read_str(libpq.pq_db(conn)))
+// ```
 pub @ffi(library = "pq", symbol = "PQdb")
 fn pq_db(conn: Int) -> Int [ffi]
 
 // Get the user name of a connection.
 //
 // The answer is the address of a string the connection owns.
+//
+// ```novo ignore
+// println(ptr.read_str(libpq.pq_user(conn)))
+// ```
 pub @ffi(library = "pq", symbol = "PQuser")
 fn pq_user(conn: Int) -> Int [ffi]
 
@@ -82,6 +118,10 @@ fn pq_user(conn: Int) -> Int [ffi]
 //
 // The answer is the address of a string the connection owns: a host
 // name, an address, or the directory of a Unix-domain socket.
+//
+// ```novo ignore
+// println(ptr.read_str(libpq.pq_host(conn)))
+// ```
 pub @ffi(library = "pq", symbol = "PQhost")
 fn pq_host(conn: Int) -> Int [ffi]
 
@@ -89,14 +129,23 @@ fn pq_host(conn: Int) -> Int [ffi]
 //
 // The answer is the address of a string the connection owns, not a
 // number.
+//
+// ```novo ignore
+// println(ptr.read_str(libpq.pq_port(conn)))
+// ```
 pub @ffi(library = "pq", symbol = "PQport")
 fn pq_port(conn: Int) -> Int [ffi]
 
 // Get the file descriptor of a connection's socket.
 //
 // Answers -1 when the connection is not open.  This is the descriptor
-// a program waits on when it drives the connection asynchronously; it
-// must never be read or written directly.
+// a program waits on when it drives the connection asynchronously.  A
+// program never reads or writes it directly, because that corrupts the
+// protocol stream.
+//
+// ```novo ignore
+// let fd = libpq.pq_socket(conn) as i32
+// ```
 pub @ffi(library = "pq", symbol = "PQsocket")
 fn pq_socket(conn: Int) -> Int [ffi]
 
@@ -105,13 +154,22 @@ fn pq_socket(conn: Int) -> Int [ffi]
 //
 // Answers 0 when the connection is not open.  It is what a
 // `pg_cancel_backend` call in another session names.
+//
+// ```novo ignore
+// let pid = libpq.pq_backend_pid(conn)
+// ```
 pub @ffi(library = "pq", symbol = "PQbackendPID")
 fn pq_backend_pid(conn: Int) -> Int [ffi]
 
 // Get the version of the server.
 //
-// The value is the major version times ten thousand plus the minor:
-// 16.2 answers 160002.  Answers 0 when the connection is not open.
+// From PostgreSQL 10 on, the value is the major version times ten
+// thousand plus the minor, so 16.2 answers 160002.  Answers 0 when the
+// connection is not open.
+//
+// ```novo ignore
+// let at_least_16 = libpq.pq_server_version(conn) >= 160000
+// ```
 pub @ffi(library = "pq", symbol = "PQserverVersion")
 fn pq_server_version(conn: Int) -> Int [ffi]
 
@@ -119,6 +177,10 @@ fn pq_server_version(conn: Int) -> Int [ffi]
 //
 // Answers 3 for every currently supported server, and 0 when the
 // connection is not open.
+//
+// ```novo ignore
+// let protocol = libpq.pq_protocol_version(conn)
+// ```
 pub @ffi(library = "pq", symbol = "PQprotocolVersion")
 fn pq_protocol_version(conn: Int) -> Int [ffi]
 
@@ -128,22 +190,36 @@ fn pq_protocol_version(conn: Int) -> Int [ffi]
 // is accepting connections, 1 when it is alive and refusing them, 2
 // when no connection could be made, and 3 when the parameters were bad
 // enough that nothing was attempted.
+//
+// ```novo ignore
+// let accepting = libpq.pq_ping("host=localhost connect_timeout=2") == 0
+// ```
 pub @ffi(library = "pq", symbol = "PQping")
 fn pq_ping(conninfo: Str) -> Int [io, ffi]
 
 // Get the version of the client library.
 //
-// The value is the major version times ten thousand plus the minor:
-// 16.15 answers 160015.
+// The value is the major version times ten thousand plus the minor, so
+// a 17.2 library answers 170002.
+//
+// ```novo ignore
+// println("${libpq.pq_lib_version()}")
+// ```
 pub @ffi(library = "pq", symbol = "PQlibVersion")
 fn pq_lib_version() -> Int [ffi]
 
 // Run one or more semicolon-separated commands and wait for the result.
 //
-// Answers a result handle, or 0 when memory ran out or the connection
-// is unusable.  The caller releases the handle with `PQclear`.  Several
-// commands in one call run in a single transaction, and only the last
-// one's result is answered.
+// Answers a result handle, or 0 when memory ran out or a serious
+// failure, such as being unable to send the command, occurred.  A
+// failed command answers a result whose status says so.  The caller
+// releases the handle with `PQclear`.  Several commands in one call run
+// in a single transaction unless the string itself contains BEGIN and
+// COMMIT, and only the last command's result is answered.
+//
+// ```novo ignore
+// let res = libpq.pq_exec(conn, "SELECT city FROM town")
+// ```
 pub @ffi(library = "pq", symbol = "PQexec")
 fn pq_exec(conn: Int, query: Str) -> Int [io, ffi]
 
@@ -157,8 +233,12 @@ fn pq_exec(conn: Int, query: Str) -> Int [io, ffi]
 // addresses, one per parameter, where 0 is a SQL NULL.  `result_format`
 // is 0 for text results and 1 for binary.
 //
-// Only ONE command is allowed here, which is what makes this the call
-// that cannot be turned into two by a value.
+// Only one command is allowed in `command`.  A parameter value is never
+// parsed as SQL, so no value can add a second command.
+//
+// ```novo ignore
+// let res = libpq.pq_exec_params(conn, "SELECT people FROM town WHERE city = $1", 1, 0, values, 0, 0, 0)
+// ```
 pub @ffi(library = "pq", symbol = "PQexecParams")
 fn pq_exec_params(conn: Int, command: Str, n_params: Int, param_types: Int, param_values: Int,
                   param_lengths: Int, param_formats: Int, result_format: Int) -> Int [io, ffi]
@@ -169,6 +249,10 @@ fn pq_exec_params(conn: Int, command: Str, n_params: Int, param_types: Int, para
 // statement.  `param_types` is the address of an array of type
 // identifiers, or 0 to let the server infer them.  Answers a result
 // handle whose status says whether the preparation succeeded.
+//
+// ```novo ignore
+// let res = libpq.pq_prepare(conn, "by_city", "SELECT people FROM town WHERE city = $1", 1, 0)
+// ```
 pub @ffi(library = "pq", symbol = "PQprepare")
 fn pq_prepare(conn: Int, stmt_name: Str, query: Str, n_params: Int,
               param_types: Int) -> Int [io, ffi]
@@ -177,6 +261,10 @@ fn pq_prepare(conn: Int, stmt_name: Str, query: Str, n_params: Int,
 //
 // The arguments after `stmt_name` are those of `PQexecParams` without
 // the types, which the preparation already fixed.
+//
+// ```novo ignore
+// let res = libpq.pq_exec_prepared(conn, "by_city", 1, values, 0, 0, 0)
+// ```
 pub @ffi(library = "pq", symbol = "PQexecPrepared")
 fn pq_exec_prepared(conn: Int, stmt_name: Str, n_params: Int, param_values: Int, param_lengths: Int,
                     param_formats: Int, result_format: Int) -> Int [io, ffi]
@@ -184,17 +272,29 @@ fn pq_exec_prepared(conn: Int, stmt_name: Str, n_params: Int, param_values: Int,
 // Quote a string as a SQL literal, for this connection.
 //
 // `len` is the length in bytes.  The answer is the address of a string
-// the CALLER owns, quotes included, released with `PQfreemem`.  It is 0
+// the caller owns, quotes included, released with `PQfreemem`.  It is 0
 // on failure.  The connection is an argument because the quoting
 // depends on the server's encoding and its standard-strings setting.
+//
+// ```novo ignore
+// let quoted = libpq.pq_escape_literal(conn, "O'Hara", 6)
+// println(ptr.read_str(quoted))   // 'O''Hara'
+// libpq.pq_freemem(quoted)
+// ```
 pub @ffi(library = "pq", symbol = "PQescapeLiteral")
 fn pq_escape_literal(conn: Int, s: Str, len: Int) -> Int [ffi]
 
 // Quote a string as a SQL identifier, for this connection.
 //
-// Like `PQescapeLiteral`, with double quotes rather than single ones.
-// This is for a table or column name that came from outside the
-// program.
+// It works as `PQescapeLiteral` does, with double quotes rather than
+// single ones.  It is the call for a table or column name that came
+// from outside the program.
+//
+// ```novo ignore
+// let quoted = libpq.pq_escape_identifier(conn, "Town", 4)
+// println(ptr.read_str(quoted))   // "Town"
+// libpq.pq_freemem(quoted)
+// ```
 pub @ffi(library = "pq", symbol = "PQescapeIdentifier")
 fn pq_escape_identifier(conn: Int, s: Str, len: Int) -> Int [ffi]
 
@@ -202,15 +302,26 @@ fn pq_escape_identifier(conn: Int, s: Str, len: Int) -> Int [ffi]
 //
 // The addresses that need it are the ones `PQescapeLiteral` and
 // `PQescapeIdentifier` answer.  Releasing the null address is allowed.
+//
+// ```novo ignore
+// libpq.pq_freemem(quoted)
+// ```
 pub @ffi(library = "pq", symbol = "PQfreemem")
 fn pq_freemem(addr: Int) [ffi]
 
 // Get the status of a result.
 //
 // Answers 0 for an empty command, 1 for a command that returns no
-// rows, 2 for one that returns rows, 5 for an unexpected response from
-// the server, 6 for a notice and 7 for a failed command.  Only 1 and 2
-// are success.
+// rows, 2 for one that returns rows, 5 for a response from the server
+// that could not be understood and 7 for a failed command.  1 and 2 are
+// the success statuses.  6, `PGRES_NONFATAL_ERROR`, names a notice or a
+// warning, and libpq passes it to the notice processor rather than
+// answering it here.  The remaining statuses belong to COPY, single-row
+// mode and pipeline mode, which this package does not include.
+//
+// ```novo ignore
+// let has_rows = libpq.pq_result_status(res) == 2
+// ```
 pub @ffi(library = "pq", symbol = "PQresultStatus")
 fn pq_result_status(res: Int) -> Int [ffi]
 
@@ -218,6 +329,10 @@ fn pq_result_status(res: Int) -> Int [ffi]
 //
 // The answer is the address of a static string such as
 // `"PGRES_TUPLES_OK"`.
+//
+// ```novo ignore
+// println(ptr.read_str(libpq.pq_res_status(2)))   // PGRES_TUPLES_OK
+// ```
 pub @ffi(library = "pq", symbol = "PQresStatus")
 fn pq_res_status(status: Int) -> Int [ffi]
 
@@ -227,16 +342,28 @@ fn pq_res_status(status: Int) -> Int [ffi]
 // newline, and it is the empty string when the command succeeded.
 // Unlike `PQerrorMessage`, it stays valid for as long as the result
 // does.
+//
+// ```novo ignore
+// println(ptr.read_str(libpq.pq_result_error_message(res)))
+// ```
 pub @ffi(library = "pq", symbol = "PQresultErrorMessage")
 fn pq_result_error_message(res: Int) -> Int [ffi]
 
 // Get the number of rows in a result.
 //
 // Answers 0 for a command that returns no rows.
+//
+// ```novo ignore
+// let rows = libpq.pq_ntuples(res)
+// ```
 pub @ffi(library = "pq", symbol = "PQntuples")
 fn pq_ntuples(res: Int) -> Int [ffi]
 
 // Get the number of columns in a result.
+//
+// ```novo ignore
+// let columns = libpq.pq_nfields(res)
+// ```
 pub @ffi(library = "pq", symbol = "PQnfields")
 fn pq_nfields(res: Int) -> Int [ffi]
 
@@ -244,13 +371,22 @@ fn pq_nfields(res: Int) -> Int [ffi]
 //
 // `field_num` is zero-based.  The answer is the address of a string the
 // result owns, or 0 when there is no such column.
+//
+// ```novo ignore
+// println(ptr.read_str(libpq.pq_fname(res, 0)))
+// ```
 pub @ffi(library = "pq", symbol = "PQfname")
 fn pq_fname(res: Int, field_num: Int) -> Int [ffi]
 
 // Get the number of a column by its name.
 //
 // Answers -1 when the result has no column of that name.  The name is
-// matched as an unquoted SQL identifier, so it is folded to lower case.
+// matched as a SQL identifier, so it is folded to lower case unless it
+// is written in double quotes.
+//
+// ```novo ignore
+// let column = libpq.pq_fnumber(res, "people") as i32
+// ```
 pub @ffi(library = "pq", symbol = "PQfnumber")
 fn pq_fnumber(res: Int, field_name: Str) -> Int [ffi]
 
@@ -258,6 +394,10 @@ fn pq_fnumber(res: Int, field_name: Str) -> Int [ffi]
 //
 // The answer is the type's object identifier in the server's own
 // `pg_type` table: 23 is `int4`, 25 is `text`, 16 is `bool`.
+//
+// ```novo ignore
+// let is_int4 = libpq.pq_ftype(res, 0) == 23
+// ```
 pub @ffi(library = "pq", symbol = "PQftype")
 fn pq_ftype(res: Int, field_num: Int) -> Int [ffi]
 
@@ -265,14 +405,22 @@ fn pq_ftype(res: Int, field_num: Int) -> Int [ffi]
 //
 // Both indexes are zero-based.  The answer is the address of the bytes,
 // which the result owns.  For a text result they are a NUL-terminated
-// string, and for a NULL field they are an empty string — which is why
-// `PQgetisnull` is the only way to tell a NULL from an empty value.
+// string.  For a NULL field they are an empty string, so `PQgetisnull`
+// is the only way to tell a NULL from an empty value.
+//
+// ```novo ignore
+// let city = ptr.read_str(libpq.pq_getvalue(res, 0, 0))
+// ```
 pub @ffi(library = "pq", symbol = "PQgetvalue")
 fn pq_getvalue(res: Int, tup_num: Int, field_num: Int) -> Int [ffi]
 
 // Ask whether one field of one row is NULL.
 //
-// Answers 1 when it is.
+// Answers 1 when it is and 0 when it is not.
+//
+// ```novo ignore
+// let is_null = libpq.pq_getisnull(res, 0, 1) == 1
+// ```
 pub @ffi(library = "pq", symbol = "PQgetisnull")
 fn pq_getisnull(res: Int, tup_num: Int, field_num: Int) -> Int [ffi]
 
@@ -280,6 +428,10 @@ fn pq_getisnull(res: Int, tup_num: Int, field_num: Int) -> Int [ffi]
 //
 // For a text result this is the length of the string without its
 // terminator, and for a binary one the size of the value.
+//
+// ```novo ignore
+// let bytes = libpq.pq_getlength(res, 0, 0)
+// ```
 pub @ffi(library = "pq", symbol = "PQgetlength")
 fn pq_getlength(res: Int, tup_num: Int, field_num: Int) -> Int [ffi]
 
@@ -287,14 +439,24 @@ fn pq_getlength(res: Int, tup_num: Int, field_num: Int) -> Int [ffi]
 //
 // The answer is the address of a string the result owns, such as
 // `"INSERT 0 1"` or `"SELECT 3"`.
+//
+// ```novo ignore
+// println(ptr.read_str(libpq.pq_cmd_status(res)))   // INSERT 0 1
+// ```
 pub @ffi(library = "pq", symbol = "PQcmdStatus")
 fn pq_cmd_status(res: Int) -> Int [ffi]
 
-// Get the number of rows an INSERT, UPDATE or DELETE affected.
+// Get the number of rows the command affected.
 //
 // The answer is the address of a string the result owns holding a
-// decimal number, and it is the empty string for a command that
-// affected no rows by that measure.
+// decimal number.  It is filled in after SELECT, CREATE TABLE AS,
+// INSERT, UPDATE, DELETE, MERGE, MOVE, FETCH and COPY, and after an
+// EXECUTE of a prepared INSERT, UPDATE, DELETE or MERGE.  After any
+// other command it is the empty string.
+//
+// ```novo ignore
+// println(ptr.read_str(libpq.pq_cmd_tuples(res)))   // 1
+// ```
 pub @ffi(library = "pq", symbol = "PQcmdTuples")
 fn pq_cmd_tuples(res: Int) -> Int [ffi]
 
@@ -302,13 +464,22 @@ fn pq_cmd_tuples(res: Int) -> Int [ffi]
 //
 // Every address read out of the result stops being valid.  Releasing
 // the null address is allowed.
+//
+// ```novo ignore
+// libpq.pq_clear(res)
+// ```
 pub @ffi(library = "pq", symbol = "PQclear")
 fn pq_clear(res: Int) [ffi]
 
 // Send a command without waiting for its result.
 //
-// Answers 1 when the command was sent.  The results are then collected
-// with `PQgetResult` until it answers 0.
+// Answers 1 when the command was sent and 0 when it was not, which
+// `PQerrorMessage` describes.  The results are then collected with
+// `PQgetResult` until it answers 0.
+//
+// ```novo ignore
+// let sent = libpq.pq_send_query(conn, "SELECT city FROM town")
+// ```
 pub @ffi(library = "pq", symbol = "PQsendQuery")
 fn pq_send_query(conn: Int, query: Str) -> Int [io, ffi]
 
@@ -317,6 +488,13 @@ fn pq_send_query(conn: Int, query: Str) -> Int [io, ffi]
 // Answers a result handle, or 0 when the command has no more results.
 // The 0 is what says the command is finished, so it must be reached
 // before another command is sent.
+//
+// ```novo ignore
+// var res = libpq.pq_get_result(conn)
+// while res != 0
+//     libpq.pq_clear(res)
+//     res = libpq.pq_get_result(conn)
+// ```
 pub @ffi(library = "pq", symbol = "PQgetResult")
 fn pq_get_result(conn: Int) -> Int [io, ffi]
 
@@ -325,6 +503,10 @@ fn pq_get_result(conn: Int) -> Int [io, ffi]
 // Answers 1 on success and 0 on a failure, which `PQerrorMessage`
 // describes.  A caller that waits on the socket calls this once the
 // socket is readable, and then `PQisBusy`.
+//
+// ```novo ignore
+// let read = libpq.pq_consume_input(conn)
+// ```
 pub @ffi(library = "pq", symbol = "PQconsumeInput")
 fn pq_consume_input(conn: Int) -> Int [io, ffi]
 
@@ -332,6 +514,10 @@ fn pq_consume_input(conn: Int) -> Int [io, ffi]
 //
 // Answers 1 when `PQgetResult` would wait for the server.  A 0 means
 // the next `PQgetResult` answers at once.
+//
+// ```novo ignore
+// let would_wait = libpq.pq_is_busy(conn) == 1
+// ```
 pub @ffi(library = "pq", symbol = "PQisBusy")
 fn pq_is_busy(conn: Int) -> Int [ffi]
 
@@ -340,12 +526,22 @@ fn pq_is_busy(conn: Int) -> Int [ffi]
 // `arg` is 1 for non-blocking.  Answers 0 on success and -1 on
 // failure.  In non-blocking mode a send may be incomplete, and
 // `PQflush` is what finishes it.
+//
+// ```novo ignore
+// let rc = libpq.pq_setnonblocking(conn, 1) as i32
+// ```
 pub @ffi(library = "pq", symbol = "PQsetnonblocking")
 fn pq_setnonblocking(conn: Int, arg: Int) -> Int [ffi]
 
 // Push whatever is queued for sending out to the server.
 //
-// Answers 0 when the queue is empty, 1 when bytes are still waiting
-// and the socket is not writable, and -1 on a failure.
+// Answers 0 when everything queued was sent, 1 when some of it could
+// not be sent yet, and -1 on a failure.  The answer 1 occurs only on a
+// non-blocking connection, and the caller waits for the socket to be
+// writable before calling again.
+//
+// ```novo ignore
+// let rc = libpq.pq_flush(conn) as i32
+// ```
 pub @ffi(library = "pq", symbol = "PQflush")
 fn pq_flush(conn: Int) -> Int [io, ffi]
